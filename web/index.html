@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Track quitting progress, milestones, journals, and recovery reminders privately and offline.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="QuitFlow">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>QuitFlow</title>
+  <script>
+    (() => {
+      const requestedLanguage = (navigator.languages?.[0] ?? navigator.language ?? 'en')
+        .toLowerCase()
+        .split('-')[0];
+      const language = ['ar', 'de', 'es', 'fr', 'id', 'ja', 'pl', 'ru', 'th', 'zh'].includes(requestedLanguage)
+        ? requestedLanguage
+        : 'en';
+      const descriptions = {
+        ar: 'تتبع التقدم المحرز في الإقلاع عن التدخين والمعالم والمجلات وتذكيرات الاسترداد بشكل خاص وغير متصل.',
+        en: 'Track quitting progress, milestones, journals, and recovery reminders privately and offline.',
+        de: 'Verfolge Fortschritt, Meilensteine, Tagebuch und Erinnerungen beim Aufhören privat und offline.',
+        es: 'Sigue tu progreso al dejar hábitos, tus hitos, tu diario y tus recordatorios de recuperación de forma privada y sin conexión.',
+        fr: 'Suivez vos progrès, vos étapes, votre journal et vos rappels pour changer vos habitudes, en privé et hors ligne.',
+        id: 'Lacak kemajuan berhenti, pencapaian, jurnal, dan pengingat pemulihan secara pribadi dan offline.',
+        pl: 'Prywatnie i offline śledź postępy w rzucaniu nałogów, kamienie milowe, dziennik i przypomnienia o zdrowieniu.',
+        ja: 'やめたい習慣の進捗、節目、日記、回復リマインダーをプライベートかつオフラインで記録できます。',
+        ru: 'Отслеживайте прогресс отказа от привычек, этапы, дневник и напоминания о восстановлении конфиденциально и без подключения к интернету.',
+        th: 'ติดตามความคืบหน้าในการเลิกพฤติกรรม เป้าหมาย บันทึก และการแจ้งเตือนการฟื้นตัวแบบเป็นส่วนตัวและออฟไลน์',
+        zh: '私密、离线地记录戒除习惯的进度、里程碑、日记和康复提醒。',
+        'zh-Hant': '私密、離線地記錄戒除習慣的進度、里程碑、日記和康復提醒。',
+      };
+
+      document.documentElement.lang = language;
+      document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
+      document.querySelector('meta[name="description"]').content =
+        descriptions[language];
+
+      const manifest = document.createElement('link');
+      manifest.rel = 'manifest';
+      manifest.href = language === 'en' ? 'manifest.json' : 'manifest_' + language.replace('-', '_') + '.json';
+      document.head.appendChild(manifest);
+    })();
+  </script>
+</head>
+<body>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

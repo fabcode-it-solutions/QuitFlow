@@ -1,0 +1,15 @@
+package com.quitter.app
+
+import android.content.Context
+import android.content.res.Configuration
+import java.util.Locale
+
+internal fun Context.withQuitFlowLocale(): Context {
+    val preferences = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+    val localeCode = preferences.getString("flutter.locale", "system")
+    if (localeCode !in setOf("ar", "en", "es", "fr", "id", "ja", "pl", "ru", "th", "zh", "zh-Hant")) return this
+
+    val configuration = Configuration(resources.configuration)
+    configuration.setLocale(Locale.forLanguageTag(localeCode))
+    return createConfigurationContext(configuration)
+}

@@ -1,0 +1,1 @@
+• Fix not remembering whether to show/hide nicotine pouches

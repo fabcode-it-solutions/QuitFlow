@@ -1,0 +1,3 @@
+• Add title to privacy policy
+• Disable notifications for an addiction when you hide it
+• Remove gradient from "Get it on Web"

@@ -1,0 +1,235 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
+import 'package:provider/provider.dart';
+import 'package:quitflow/addiction_provider.dart';
+import 'package:quitflow/app_theme_mode.dart';
+import 'package:quitflow/edit_entry_page.dart';
+import 'package:quitflow/entry.dart';
+import 'package:quitflow/home_page.dart';
+import 'package:quitflow/l10n/generated/app_localizations.dart';
+import 'package:quitflow/marijuana_page.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:quitflow/main.dart' as app;
+import 'package:quitflow/alcohol_page.dart';
+import 'package:quitflow/settings_page.dart';
+import 'package:quitflow/smoking_page.dart';
+import 'package:quitflow/settings_provider.dart';
+
+const screenshotLocale = String.fromEnvironment(
+  'QUITTER_LOCALE',
+  defaultValue: 'en',
+);
+
+String get screenshotStoreLocale => switch (screenshotLocale) {
+  'ar' => 'ar-SA',
+  'de' => 'de-DE',
+  'es' => 'es-ES',
+  'fr' => 'fr-FR',
+  'id' => 'id-ID',
+  'pl' => 'pl-PL',
+  'th' => 'th-TH',
+  'ja' => 'ja-JP',
+  'ru' => 'ru-RU',
+  'zh' => 'zh-CN',
+  'zh-Hant' => 'zh-TW',
+  _ => 'en-US',
+};
+
+Future<void> appWrapper() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setEnabledSystemUIMode(
+    SystemUiMode.manual,
+    overlays: const [],
+  );
+  final settings = SettingsProvider();
+  await settings.loadPreferences();
+  final addictions = AddictionProvider();
+  await addictions.loadAddictions();
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (context) => settings),
+        ChangeNotifierProvider(create: (context) => addictions),
+      ],
+      child: const app.QuitFlowApp(),
+    ),
+  );
+}
+
+void navigate({required BuildContext context, required Widget page}) {
+  Navigator.of(context).push(MaterialPageRoute(builder: (context) => page));
+}
+
+Future<void> screenshot({
+  required IntegrationTestWidgetsFlutterBinding binding,
+  required WidgetTester tester,
+  required String name,
+  Future<void> Function(BuildContext context)? goToPage,
+  bool settle = false,
+}) async {
+  await appWrapper();
+  await tester.pumpAndSettle();
+
+  if (goToPage != null) {
+    final BuildContext context = tester.element(find.byType(HomePage));
+    if (context.mounted) await goToPage(context);
+  }
+
+  settle ? await tester.pump() : await tester.pumpAndSettle();
+  await binding.convertFlutterSurfaceToImage();
+  settle ? await tester.pump() : await tester.pumpAndSettle();
+  if (defaultTargetPlatform != TargetPlatform.linux)
+    await binding.takeScreenshot('${name}_$screenshotStoreLocale');
+}
+
+void main() {
+  IntegrationTestWidgetsFlutterBinding binding =
+      IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    await prefs.setString('locale', screenshotLocale);
+    await prefs.setInt('notify_every', 0);
+    await prefs.setString(
+      'vaping',
+      DateTime.now().subtract(const Duration(days: 3)).toIso8601String(),
+    );
+    await prefs.setString(
+      'smoking',
+      DateTime.now().subtract(const Duration(days: 6)).toIso8601String(),
+    );
+    await prefs.setString(
+      'marijuana',
+      DateTime.now().subtract(const Duration(days: 13)).toIso8601String(),
+    );
+  });
+
+  group("Generate QuitFlow App Screenshots", () {
+    testWidgets(
+      "HomePage",
+      (tester) async =>
+          await screenshot(binding: binding, tester: tester, name: '1'),
+    );
+
+    testWidgets(
+      "AlcoholPage",
+      (tester) async => await screenshot(
+        binding: binding,
+        tester: tester,
+        name: '2',
+        goToPage: (context) async {
+          navigate(context: context, page: const AlcoholPage(started: true));
+          final settings = context.read<SettingsProvider>();
+          settings.themeMode = AppThemeMode.light;
+        },
+      ),
+    );
+
+    testWidgets(
+      "SmokingPage",
+      (tester) async => await screenshot(
+        binding: binding,
+        tester: tester,
+        name: '3',
+        goToPage: (context) async {
+          navigate(context: context, page: const SmokingPage(started: true));
+          final settings = context.read<SettingsProvider>();
+          settings.themeMode = AppThemeMode.dark;
+        },
+      ),
+    );
+
+    testWidgets(
+      "CustomEntryPage",
+      (tester) async => await screenshot(
+        binding: binding,
+        tester: tester,
+        name: '4',
+        goToPage: (context) async {
+          navigate(
+            context: context,
+            page: EditEntryPage(
+              entry: Entry(
+                id: 'fake',
+                color: Colors.purple,
+                quitDate: DateTime.now().subtract(const Duration(days: 3)),
+                title: AppLocalizations.of(context)!.addictionSocialMedia,
+              ),
+            ),
+          );
+          final settings = context.read<SettingsProvider>();
+          settings.themeMode = AppThemeMode.light;
+        },
+      ),
+    );
+
+    testWidgets(
+      "HomePageLongPress",
+      (tester) async => await screenshot(
+        binding: binding,
+        tester: tester,
+        name: '5',
+        goToPage: (context) async {
+          final settings = context.read<SettingsProvider>();
+          settings.themeMode = AppThemeMode.dark;
+          final smokingLabel = AppLocalizations.of(context)!.addictionSmoking;
+          await tester.pumpAndSettle();
+          await tester.longPress(find.text(smokingLabel));
+          await tester.pumpAndSettle();
+        },
+      ),
+    );
+
+    testWidgets(
+      "MarijuanaPage",
+      (tester) async => await screenshot(
+        binding: binding,
+        tester: tester,
+        name: '6',
+        goToPage: (context) async {
+          final settings = context.read<SettingsProvider>();
+          settings.themeMode = AppThemeMode.light;
+          navigate(context: context, page: const MarijuanaPage(started: true));
+        },
+      ),
+    );
+
+    testWidgets(
+      "SettingsPage",
+      (tester) async => await screenshot(
+        binding: binding,
+        tester: tester,
+        name: '7',
+        goToPage: (context) async {
+          final settings = context.read<SettingsProvider>();
+          settings.themeMode = AppThemeMode.pureBlack;
+          navigate(context: context, page: const SettingsPage());
+        },
+      ),
+    );
+
+    testWidgets(
+      "JournalPage",
+      (tester) async => await screenshot(
+        binding: binding,
+        tester: tester,
+        name: '8',
+        goToPage: (context) async {
+          final settings = context.read<SettingsProvider>();
+          settings.themeMode = AppThemeMode.light;
+          await tester.pumpAndSettle();
+          final TabController tabController = tester
+              .widget<TabBar>(find.byType(TabBar))
+              .controller!;
+          tabController.animateTo(1); // Move to Journal tab
+          await tester.pumpAndSettle();
+        },
+      ),
+    );
+  });
+}

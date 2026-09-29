@@ -1,0 +1,60 @@
+import 'package:flutter/material.dart';
+import 'package:quitflow/app_icons.dart';
+
+class Entry {
+  String id;
+  String title;
+  DateTime quitDate;
+  Color color;
+  List<int> daysAchieved;
+  IconData? icon;
+
+  Entry({
+    required this.id,
+    required this.title,
+    required this.quitDate,
+    required this.color,
+    List<int>? daysAchieved,
+    this.icon,
+  }) : daysAchieved = List<int>.of(daysAchieved ?? const []);
+
+  Entry copyWith({
+    String? id,
+    String? title,
+    DateTime? quitDate,
+    Color? color,
+    List<int>? daysAchieved,
+    IconData? icon,
+  }) {
+    return Entry(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      quitDate: quitDate ?? this.quitDate,
+      color: color ?? this.color,
+      daysAchieved: daysAchieved ?? this.daysAchieved,
+      icon: icon ?? this.icon,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'quitDate': quitDate.toIso8601String(),
+    'color': color.toARGB32(),
+    'daysAchieved': daysAchieved,
+    'icon': icon != null ? iconNames[icon] : null,
+  };
+
+  factory Entry.fromJson(Map<String, dynamic> json) => Entry(
+    id: json['id'] as String,
+    title: json['title'] as String,
+    quitDate: DateTime.parse(json['quitDate'] as String),
+    color: Color(json['color'] as int),
+    daysAchieved:
+        (json['daysAchieved'] as List<dynamic>?)
+            ?.map((e) => e as int)
+            .toList() ??
+        const [],
+    icon: json['icon'] != null ? allIcons[json['icon'] as String] : null,
+  );
+}

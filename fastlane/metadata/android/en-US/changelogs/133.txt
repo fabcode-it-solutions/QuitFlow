@@ -1,0 +1,3 @@
+• Fix google play deploy step
+• Fix reminders neurology icon
+• Fix running in github releases

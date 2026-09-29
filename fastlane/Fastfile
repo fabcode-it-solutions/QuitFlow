@@ -1,0 +1,81 @@
+# This file contains the fastlane lanes.
+# More information about fastlane can be found here:
+# https://docs.fastlane.tools
+
+default_platform(:android)
+
+platform :android do
+  private_lane :sync_localized_changelogs do
+    sh("python3", File.expand_path("../scripts/sync_play_changelogs.py", __dir__))
+  end
+
+  desc "Deploy to Google Play"
+  lane :deploy do |options|
+    metadata(
+      track: options[:track] || "production",
+      skip_changelogs: true
+    )
+    supply(
+      aab: options[:aab],
+      json_key: options[:json_key],
+      package_name: "com.quitter.app",
+      track: options[:track] || "production",
+      skip_upload_changelogs: false,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  desc "Upload the complete Google Play store listing without a binary release"
+  lane :metadata do |options|
+    sync_localized_changelogs
+    track = options[:track] || "production"
+    skip_changelogs = options[:skip_changelogs].to_s == "true"
+
+    supply(
+      json_key: options[:json_key],
+      package_name: "com.quitter.app",
+      track: track,
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_changelogs: true,
+      skip_upload_metadata: false,
+      skip_upload_images: false,
+      skip_upload_screenshots: false
+    )
+
+    unless skip_changelogs
+      version_codes = google_play_track_version_codes(
+        json_key: options[:json_key],
+        package_name: "com.quitter.app",
+        track: track
+      )
+      UI.user_error!("No active Google Play version codes found for #{track}.") if version_codes.empty?
+      version_code = version_codes.max
+
+      Dir.glob(File.expand_path("metadata/android/*/changelogs/#{version_code}.txt", __dir__)).each do |path|
+        changelog = File.read(path, encoding: "UTF-8").strip
+        next if changelog.length <= 500
+
+        locale = File.basename(File.dirname(File.dirname(path)))
+        UI.user_error!(
+          "#{locale} changelog for version #{version_code} is #{changelog.length} characters; Google Play allows 500."
+        )
+      end
+
+      supply(
+        json_key: options[:json_key],
+        package_name: "com.quitter.app",
+        track: track,
+        version_code: version_code,
+        skip_upload_apk: true,
+        skip_upload_aab: true,
+        skip_upload_changelogs: false,
+        skip_upload_metadata: true,
+        skip_upload_images: true,
+        skip_upload_screenshots: true
+      )
+    end
+  end
+end

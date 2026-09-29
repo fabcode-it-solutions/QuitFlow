@@ -1,0 +1,626 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
+import 'package:quitflow/l10n/generated/app_localizations.dart';
+import 'package:quitflow/locale_utils.dart';
+import 'package:quitflow/settings_page.dart';
+import 'package:quitflow/app_theme_mode.dart';
+import 'package:quitflow/settings_provider.dart';
+import 'package:quitflow/addiction_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+void main() {
+  late SettingsProvider settingsProvider;
+  late AddictionProvider addictionProvider;
+
+  final allAddictions = {
+    'alcohol': DateTime.now().toIso8601String(),
+    'vaping': DateTime.now().toIso8601String(),
+    'smoking': DateTime.now().toIso8601String(),
+    'marijuana': DateTime.now().toIso8601String(),
+    'nicotine_pouches': DateTime.now().toIso8601String(),
+    'opioids': DateTime.now().toIso8601String(),
+    'social_media': DateTime.now().toIso8601String(),
+    'pornography': DateTime.now().toIso8601String(),
+    'cocaine': DateTime.now().toIso8601String(),
+    'benzos': DateTime.now().toIso8601String(),
+    'meth': DateTime.now().toIso8601String(),
+    'adderall': DateTime.now().toIso8601String(),
+  };
+
+  setUp(() async {
+    SharedPreferences.setMockInitialValues(allAddictions);
+    settingsProvider = SettingsProvider();
+    await settingsProvider.loadPreferences();
+    addictionProvider = AddictionProvider();
+    await addictionProvider.loadAddictions();
+  });
+
+  Widget createTestWidget() {
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider<SettingsProvider>.value(value: settingsProvider),
+        ChangeNotifierProvider<AddictionProvider>.value(
+          value: addictionProvider,
+        ),
+      ],
+      child: Consumer<SettingsProvider>(
+        builder: (context, settings, child) => MaterialApp(
+          locale: settings.locale == 'system' ? null : Locale(settings.locale),
+          localizationsDelegates: const [
+            AppLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: const SettingsPage(),
+        ),
+      ),
+    );
+  }
+
+  group('SettingsPage', () {
+    testWidgets('displays appearance section header', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      expect(find.text('Appearance'), findsOneWidget);
+    });
+
+    testWidgets('displays search bar', (WidgetTester tester) async {
+      await tester.pumpWidget(createTestWidget());
+
+      expect(find.text('Search settings...'), findsOneWidget);
+    });
+
+    testWidgets('displays theme setting', (WidgetTester tester) async {
+      await tester.pumpWidget(createTestWidget());
+
+      expect(find.text('System'), findsOneWidget);
+      expect(find.text('Dark'), findsOneWidget);
+      expect(find.text('Light'), findsOneWidget);
+    });
+
+    testWidgets('displays color scheme setting', (WidgetTester tester) async {
+      await tester.pumpWidget(createTestWidget());
+
+      expect(find.text('Color scheme'), findsOneWidget);
+    });
+
+    testWidgets(
+      'language picker lists every supported locale and applies now',
+      (WidgetTester tester) async {
+        await tester.pumpWidget(createTestWidget());
+
+        expect(find.text('Language'), findsOneWidget);
+        expect(find.text('System default'), findsOneWidget);
+
+        await tester.tap(find.text('Language'));
+        await tester.pumpAndSettle();
+
+        final dialog = find.byType(AlertDialog);
+        expect(
+          find.descendant(of: dialog, matching: find.text('System default')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: dialog, matching: find.text('English')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: dialog, matching: find.text('Arabic')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: dialog, matching: find.text('German')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: dialog, matching: find.text('Spanish')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: dialog, matching: find.text('French')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: dialog, matching: find.text('Japanese')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: dialog, matching: find.text('Thai')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: dialog,
+            matching: find.text('Simplified Chinese'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: dialog,
+            matching: find.text('Traditional Chinese'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: dialog, matching: find.text('Russian')),
+          findsOneWidget,
+        );
+        expect(AppLocalizations.supportedLocales.map(localePreferenceValue), [
+          'ar',
+          'de',
+          'en',
+          'es',
+          'fr',
+          'id',
+          'ja',
+          'pl',
+          'ru',
+          'th',
+          'zh',
+          'zh-Hant',
+        ]);
+
+        await tester.tap(find.text('Arabic'));
+        await tester.pumpAndSettle();
+
+        expect(settingsProvider.locale, 'ar');
+        expect(find.text('لغة'), findsOneWidget);
+        expect(find.text('العربية'), findsOneWidget);
+      },
+    );
+
+    testWidgets('language picker can restore and persist system default', (
+      WidgetTester tester,
+    ) async {
+      await settingsProvider.setLocale('ja');
+      await tester.pumpWidget(createTestWidget());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('言語'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('システムのデフォルト'));
+      await tester.pumpAndSettle();
+
+      expect(settingsProvider.locale, 'system');
+      expect(find.text('Language'), findsOneWidget);
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('locale'), 'system');
+
+      final reloaded = SettingsProvider();
+      await reloaded.loadPreferences();
+      expect(reloaded.locale, 'system');
+    });
+
+    test('persists the language override across provider reloads', () async {
+      await settingsProvider.setLocale('zh');
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('locale'), 'zh');
+
+      final reloaded = SettingsProvider();
+      await reloaded.loadPreferences();
+
+      expect(reloaded.locale, 'zh');
+    });
+
+    testWidgets('displays reset buttons toggle', (WidgetTester tester) async {
+      await tester.pumpWidget(createTestWidget());
+
+      expect(find.text('Reset buttons'), findsOneWidget);
+      expect(find.text('Show reset buttons on quit pages'), findsOneWidget);
+    });
+
+    testWidgets('displays show journal toggle', (WidgetTester tester) async {
+      await tester.pumpWidget(createTestWidget());
+
+      expect(find.text('Show journal'), findsOneWidget);
+      expect(
+        find.text('Enable the journal tab for logging your thoughts'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('displays main screen addiction toggles', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+      await tester.pumpAndSettle();
+
+      final items = [
+        'Alcohol',
+        'Vaping',
+        'Smoking',
+        'Marijuana',
+        'Nicotine pouches',
+        'Opioids',
+      ];
+
+      for (final item in items) {
+        await tester.dragUntilVisible(
+          find.text(item),
+          find.byType(ListView),
+          const Offset(0, -50),
+        );
+        expect(find.text(item), findsOneWidget);
+      }
+    });
+
+    testWidgets('displays system menu items', (WidgetTester tester) async {
+      await tester.pumpWidget(createTestWidget());
+
+      await tester.dragUntilVisible(
+        find.text('About'),
+        find.byType(ListView),
+        const Offset(0, -300),
+      );
+
+      expect(find.text('About'), findsOneWidget);
+
+      await tester.dragUntilVisible(
+        find.text("What's new"),
+        find.byType(ListView),
+        const Offset(0, -300),
+      );
+      expect(find.text("What's new"), findsOneWidget);
+      await tester.dragUntilVisible(
+        find.text('Enjoying the app?'),
+        find.byType(ListView),
+        const Offset(0, -300),
+      );
+      expect(find.text('Enjoying the app?'), findsOneWidget);
+      await tester.dragUntilVisible(
+        find.text('Report a bug'),
+        find.byType(ListView),
+        const Offset(0, -300),
+      );
+      expect(find.text('Report a bug'), findsOneWidget);
+      await tester.dragUntilVisible(
+        find.text('Export data'),
+        find.byType(ListView),
+        const Offset(0, -300),
+      );
+      expect(find.text('Export data'), findsOneWidget);
+
+      await tester.dragUntilVisible(
+        find.text('Import data'),
+        find.byType(ListView),
+        const Offset(0, -300),
+      );
+      expect(find.text('Import data'), findsOneWidget);
+    });
+
+    testWidgets('selecting light theme updates settings', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      await tester.tap(find.text('Light'));
+      await tester.pumpAndSettle();
+
+      expect(settingsProvider.themeMode, AppThemeMode.light);
+    });
+
+    testWidgets('toggling reset buttons switch works', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      final initialValue = settingsProvider.showReset;
+
+      final resetSwitch = find.ancestor(
+        of: find.text('Reset buttons'),
+        matching: find.byType(SwitchListTile),
+      );
+
+      await tester.tap(resetSwitch);
+      await tester.pump();
+
+      expect(settingsProvider.showReset, !initialValue);
+    });
+
+    testWidgets('toggling show journal switch works', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      final initialValue = settingsProvider.showJournal;
+
+      final journalSwitch = find.ancestor(
+        of: find.text('Show journal'),
+        matching: find.byType(SwitchListTile),
+      );
+
+      await tester.tap(journalSwitch);
+      await tester.pump();
+
+      expect(settingsProvider.showJournal, !initialValue);
+    });
+
+    testWidgets('displays pure black AMOLED toggle', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      expect(find.text('Pure black'), findsOneWidget);
+    });
+
+    testWidgets('toggling swipe between tabs switch works', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      final initialValue = settingsProvider.swipeTabs;
+
+      final swipeTabsSwitch = find.ancestor(
+        of: find.text('Swipe between tabs'),
+        matching: find.byType(SwitchListTile),
+      );
+
+      await tester.dragUntilVisible(
+        swipeTabsSwitch,
+        find.byType(ListView),
+        const Offset(0, -500),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(swipeTabsSwitch);
+      await tester.pumpAndSettle();
+
+      expect(settingsProvider.swipeTabs, !initialValue);
+    });
+
+    testWidgets('toggling notify alcohol switch works', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      final initialValue = settingsProvider.notifyAlcohol;
+
+      final notifyAlcoholSwitch = find.ancestor(
+        of: find.text('Notify alcohol quitting progress'),
+        matching: find.byType(SwitchListTile),
+      );
+
+      await tester.dragUntilVisible(
+        notifyAlcoholSwitch,
+        find.byType(ListView),
+        const Offset(0, -500),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(notifyAlcoholSwitch);
+      await tester.pumpAndSettle();
+
+      expect(settingsProvider.notifyAlcohol, !initialValue);
+    });
+
+    testWidgets('toggling notify vaping switch works', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      final initialValue = settingsProvider.notifyVaping;
+
+      final notifyVapingSwitch = find.ancestor(
+        of: find.text('Notify vaping quitting progress'),
+        matching: find.byType(SwitchListTile),
+      );
+
+      await tester.dragUntilVisible(
+        notifyVapingSwitch,
+        find.byType(ListView),
+        const Offset(0, -500),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(notifyVapingSwitch);
+      await tester.pumpAndSettle();
+
+      expect(settingsProvider.notifyVaping, !initialValue);
+    });
+
+    testWidgets('toggling notify smoking switch works', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      final initialValue = settingsProvider.notifySmoking;
+
+      final notifySmokingSwitch = find.ancestor(
+        of: find.text('Notify smoking quitting progress'),
+        matching: find.byType(SwitchListTile),
+      );
+
+      await tester.dragUntilVisible(
+        notifySmokingSwitch,
+        find.byType(ListView),
+        const Offset(0, -500),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(notifySmokingSwitch);
+      await tester.pumpAndSettle();
+
+      expect(settingsProvider.notifySmoking, !initialValue);
+    });
+
+    testWidgets('toggling notify marijuana switch works', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      final initialValue = settingsProvider.notifyMarijuana;
+
+      final notifyMarijuanaSwitch = find.ancestor(
+        of: find.text('Notify marijuana quitting progress'),
+        matching: find.byType(SwitchListTile),
+      );
+
+      await tester.dragUntilVisible(
+        notifyMarijuanaSwitch,
+        find.byType(ListView),
+        const Offset(0, -500),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(notifyMarijuanaSwitch);
+      await tester.pumpAndSettle();
+
+      expect(settingsProvider.notifyMarijuana, !initialValue);
+    });
+
+    testWidgets('toggling notify nicotine pouches switch works', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      final initialValue = settingsProvider.notifyPouches;
+
+      final notifyNicotinePouchesSwitch = find.ancestor(
+        of: find.text('Notify nicotine pouches quitting progress'),
+        matching: find.byType(SwitchListTile),
+      );
+
+      await tester.dragUntilVisible(
+        notifyNicotinePouchesSwitch,
+        find.byType(ListView),
+        const Offset(0, -500),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(notifyNicotinePouchesSwitch);
+      await tester.pumpAndSettle();
+
+      expect(settingsProvider.notifyPouches, !initialValue);
+    });
+
+    testWidgets('toggling notify opioids switch works', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      final initialValue = settingsProvider.notifyOpioids;
+
+      final notifyOpioidsSwitch = find.ancestor(
+        of: find.text('Notify opioids quitting progress'),
+        matching: find.byType(SwitchListTile),
+      );
+
+      await tester.dragUntilVisible(
+        notifyOpioidsSwitch,
+        find.byType(ListView),
+        const Offset(0, -500),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(notifyOpioidsSwitch);
+      await tester.pumpAndSettle();
+
+      expect(settingsProvider.notifyOpioids, !initialValue);
+    });
+
+    testWidgets('toggling notify social media switch works', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      final initialValue = settingsProvider.notifySocialMedia;
+
+      final notifySocialMediaSwitch = find.ancestor(
+        of: find.text('Notify social media quitting progress'),
+        matching: find.byType(SwitchListTile),
+      );
+
+      await tester.dragUntilVisible(
+        notifySocialMediaSwitch,
+        find.byType(ListView),
+        const Offset(0, -500),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(notifySocialMediaSwitch);
+      await tester.pumpAndSettle();
+
+      expect(settingsProvider.notifySocialMedia, !initialValue);
+    });
+
+    testWidgets('toggling notify pornography switch works', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      final initialValue = settingsProvider.notifyPornography;
+
+      final notifyPornographySwitch = find.ancestor(
+        of: find.text('Notify adult content quitting progress'),
+        matching: find.byType(SwitchListTile),
+      );
+
+      await tester.dragUntilVisible(
+        notifyPornographySwitch,
+        find.byType(ListView),
+        const Offset(0, -500),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(notifyPornographySwitch);
+      await tester.pumpAndSettle();
+
+      expect(settingsProvider.notifyPornography, !initialValue);
+    });
+
+    testWidgets('toggling notify relapse switch works', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      final initialValue = settingsProvider.notifyRelapse;
+
+      final notifyRelapseSwitch = find.ancestor(
+        of: find.text('Show positive reinforcement after relapses'),
+        matching: find.byType(SwitchListTile),
+      );
+
+      await tester.dragUntilVisible(
+        notifyRelapseSwitch,
+        find.byType(ListView),
+        const Offset(0, -500),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(notifyRelapseSwitch);
+      await tester.pumpAndSettle();
+
+      expect(settingsProvider.notifyRelapse, !initialValue);
+    });
+
+    testWidgets('displays export and import data options', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(createTestWidget());
+
+      await tester.dragUntilVisible(
+        find.text('Export data'),
+        find.byType(ListView),
+        const Offset(0, -300),
+      );
+
+      expect(find.text('Export data'), findsOneWidget);
+
+      await tester.dragUntilVisible(
+        find.text('Import data'),
+        find.byType(ListView),
+        const Offset(0, -300),
+      );
+      expect(find.text('Import data'), findsOneWidget);
+    });
+  });
+}

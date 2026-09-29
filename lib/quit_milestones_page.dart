@@ -1,0 +1,530 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:provider/provider.dart';
+import 'package:quitflow/addiction_provider.dart';
+import 'package:quitflow/confetti_widget.dart';
+import 'package:quitflow/l10n/generated/app_localizations.dart';
+import 'package:quitflow/quit_milestone.dart';
+import 'package:quitflow/settings_provider.dart';
+import 'package:quitflow/timeline_tile.dart';
+import 'package:quitflow/utils.dart';
+import 'package:share_plus/share_plus.dart';
+
+class QuitMilestonesPage extends StatefulWidget {
+  final String title;
+  final String storageKey;
+  final List<QuitMilestone> milestones;
+  final String headerStarted;
+  final String headerNotStarted;
+  final String subtitleStarted;
+  final String subtitleNotStarted;
+  final String? infoBoxMessage;
+  final String? shareTitle;
+  final bool initialStarted;
+  final List<int> customDaysAchieved;
+  final String? quitDateOverride;
+  final Function(DateTime)? onQuitDateChanged;
+  final Function(int days)? onResetPressed;
+
+  const QuitMilestonesPage({
+    super.key,
+    required this.title,
+    required this.storageKey,
+    required this.milestones,
+    required this.headerStarted,
+    required this.headerNotStarted,
+    required this.subtitleStarted,
+    required this.subtitleNotStarted,
+    this.infoBoxMessage,
+    this.shareTitle,
+    required this.initialStarted,
+    this.customDaysAchieved = const [],
+    this.quitDateOverride,
+    this.onQuitDateChanged,
+    this.onResetPressed,
+  });
+
+  @override
+  State<QuitMilestonesPage> createState() => _QuitMilestonesPageState();
+}
+
+class _QuitMilestonesPageState extends State<QuitMilestonesPage> {
+  bool showConfetti = false;
+  bool started = false;
+  final ScrollController _scroll = ScrollController();
+  final controller = TextEditingController();
+  DateTime quitDate = DateTime.now();
+  int? _targetIndex;
+  final _targetTileKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+
+    final addictions = context.read<AddictionProvider>();
+    var quitOn =
+        widget.quitDateOverride ?? addictions.getAddiction(widget.storageKey);
+
+    setState(() {
+      final parsedQuitDate = quitOn == null ? null : DateTime.tryParse(quitOn);
+      if (parsedQuitDate != null) quitDate = parsedQuitDate;
+      started = widget.initialStarted;
+    });
+
+    if (started) {
+      final currentDayFromQuitOn = daysCeil(quitDate.toIso8601String());
+      final nextIndex = widget.milestones.indexWhere(
+        (m) => currentDayFromQuitOn < m.day,
+      );
+      _targetIndex = nextIndex <= 0
+          ? (nextIndex == -1 ? widget.milestones.length - 1 : 0)
+          : nextIndex - 1;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final ctx = _targetTileKey.currentContext;
+        if (ctx != null && mounted) {
+          Scrollable.ensureVisible(
+            ctx,
+            alignment: 0.1,
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _updateQuitDate(quitDate);
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _updateQuitDate(DateTime quitDate) {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+    final days = daysCeil(quitDate.toIso8601String());
+    controller.text = l10n.alcoholPageQuitDateDisplay(quitDate, days);
+  }
+
+  void _handleStartPressed() async {
+    final addictions = context.read<AddictionProvider>();
+    if (!context.mounted) return;
+    final settingsProvider = context.read<SettingsProvider>();
+    if (settingsProvider.notifyEvery > 0 &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      final permission = await Permission.notification.request();
+      if (permission.isDenied && context.mounted) {
+        await settingsProvider.setNotificationSchedule(
+          days: 0,
+          at: settingsProvider.notifyAt,
+        );
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      showConfetti = true;
+      started = true;
+    });
+
+    if (widget.onQuitDateChanged != null) {
+      await widget.onQuitDateChanged!(quitDate);
+    } else {
+      await addictions.setAddiction(
+        widget.storageKey,
+        quitDate.toIso8601String(),
+      );
+    }
+
+    Future.delayed(const Duration(milliseconds: 2500), () {
+      if (mounted) {
+        setState(() {
+          showConfetti = false;
+        });
+      }
+    });
+  }
+
+  void onShare(int day) {
+    final l10n = AppLocalizations.of(context)!;
+    final shareTitle = widget.shareTitle?.trim();
+    final title = shareTitle == null || shareTitle.isEmpty
+        ? widget.title
+        : shareTitle;
+
+    SharePlus.instance.share(
+      ShareParams(text: l10n.quitMilestonesShareMessage(day, title)),
+    );
+  }
+
+  void pickDate() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: quitDate,
+      firstDate: DateTime(0),
+      lastDate: DateTime.now(),
+    );
+    if (!mounted || date == null) return;
+    setState(() {
+      quitDate = date;
+      started = true;
+    });
+    _updateQuitDate(quitDate);
+
+    if (!mounted) return;
+    if (widget.onQuitDateChanged != null) {
+      await widget.onQuitDateChanged!(date);
+      return;
+    }
+    final addictions = context.read<AddictionProvider>();
+    await addictions.setAddiction(widget.storageKey, date.toIso8601String());
+  }
+
+  void _showClearMilestoneBottomSheet(QuitMilestone milestone) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext context) {
+        final l10n = AppLocalizations.of(context)!;
+        return SafeArea(
+          child: Container(
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.primary.withAlpha((255 * 0.1).round()),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.clear_all,
+                    size: 32,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  l10n.quitMilestonesClearTitle(milestone.day),
+                  style: Theme.of(context).textTheme.headlineSmall,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  l10n.quitMilestonesClearMessage(milestone.day),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withAlpha((255 * 0.7).round()),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(l10n.cancel),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          final allDaysAchieved =
+                              widget.customDaysAchieved.isNotEmpty
+                              ? widget.customDaysAchieved
+                              : context.read<AddictionProvider>().getDays(
+                                  widget.storageKey,
+                                );
+
+                          final List<int> daysToClear = [];
+                          for (int achievedDay in allDaysAchieved) {
+                            int closestMilestoneDay = 0;
+                            for (QuitMilestone m in widget.milestones) {
+                              if (m.day <= achievedDay) {
+                                closestMilestoneDay = m.day;
+                              } else {
+                                break;
+                              }
+                            }
+                            if (closestMilestoneDay == milestone.day) {
+                              daysToClear.add(achievedDay);
+                            }
+                          }
+
+                          context.read<AddictionProvider>().clearMilestoneDays(
+                            widget.storageKey,
+                            daysToClear,
+                          );
+                        },
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(l10n.quitMilestonesClear),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final settings = context.watch<SettingsProvider>();
+    final addictions = context.watch<AddictionProvider>();
+    final days = daysCeil(quitDate.toIso8601String());
+    final l10n = AppLocalizations.of(context)!;
+
+    Widget? fab;
+    if (started == false) {
+      fab = FloatingActionButton.extended(
+        key: const ValueKey('start_fab'),
+        onPressed: _handleStartPressed,
+        label: Text(l10n.quitStartButton),
+        icon: const Icon(Icons.rocket_launch),
+      );
+    } else {
+      fab = FloatingActionButton.extended(
+        onPressed: () async {
+          if (widget.onResetPressed != null) {
+            await widget.onResetPressed!(days);
+          } else {
+            await addictions.resetAddiction(widget.storageKey, days);
+          }
+
+          if (!context.mounted) return;
+          final quit = quitDate;
+          setState(() {
+            quitDate = DateTime.now();
+          });
+
+          _updateQuitDate(quitDate);
+
+          final settings = context.read<SettingsProvider>();
+          if (settings.notifyRelapse == false) return;
+
+          final message = getRelapseEncouragementMessage(context);
+          toast(
+            message,
+            action: SnackBarAction(
+              label: l10n.undo,
+              onPressed: () async {
+                await addictions.setAddiction(
+                  widget.storageKey,
+                  quit.toIso8601String(),
+                );
+                await addictions.popDays(widget.storageKey);
+
+                if (!mounted) return;
+                setState(() {
+                  quitDate = quit;
+                });
+                _updateQuitDate(quitDate);
+              },
+            ),
+          );
+        },
+        label: Text(l10n.quitResetButton),
+        icon: const Icon(Icons.restart_alt),
+      );
+    }
+
+    if (settings.showReset == false) fab = null;
+
+    final listBottomPadding = fab != null ? 72.0 : 16.0;
+
+    return ConfettiWidget(
+      active: showConfetti,
+      child: Scaffold(
+        backgroundColor: colorScheme.surface,
+        appBar: AppBar(
+          title: Text(widget.title),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.share),
+              onPressed: () => onShare(days),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                decoration: BoxDecoration(
+                  borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(24),
+                    bottomRight: Radius.circular(24),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 8),
+                    Text(
+                      started ? widget.headerStarted : widget.headerNotStarted,
+                      style: Theme.of(context).textTheme.headlineMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      started
+                          ? widget.subtitleStarted
+                          : widget.subtitleNotStarted,
+                      style: Theme.of(context).textTheme.titleMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      readOnly: true,
+                      controller: controller,
+                      decoration: InputDecoration(
+                        labelText: l10n.quitMilestonesQuitDate,
+                        border: const OutlineInputBorder(),
+                        suffixIcon: IconButton(
+                          icon: days > 7
+                              ? const Icon(Icons.calendar_month)
+                              : const Icon(Icons.calendar_today),
+                          onPressed: pickDate,
+                        ),
+                      ),
+                      onTap: pickDate,
+                    ),
+                    if (widget.infoBoxMessage != null) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: theme.appBarTheme.titleTextStyle?.color
+                              ?.withAlpha((255 * 0.1).round()),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.health_and_safety,
+                              size: 16,
+                              color: theme.appBarTheme.titleTextStyle?.color,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                widget.infoBoxMessage!,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color:
+                                      theme.appBarTheme.titleTextStyle?.color,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: _scroll,
+                  padding: EdgeInsets.only(
+                    left: 16.0,
+                    right: 16.0,
+                    top: 16.0,
+                    bottom: listBottomPadding,
+                  ),
+                  child: Column(
+                    children: widget.milestones.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final milestone = entry.value;
+                      final isCompleted = days >= milestone.day;
+                      final isNext =
+                          !isCompleted &&
+                          (index == 0 ||
+                              days >= widget.milestones[index - 1].day);
+
+                      final allDaysAchieved =
+                          widget.customDaysAchieved.isNotEmpty
+                          ? widget.customDaysAchieved
+                          : addictions.getDays(widget.storageKey);
+
+                      final List<int> milestoneDaysToMark = [];
+                      for (int achievedDay in allDaysAchieved) {
+                        int closestMilestoneDay = 0;
+                        for (QuitMilestone m in widget.milestones) {
+                          if (m.day <= achievedDay) {
+                            closestMilestoneDay = m.day;
+                          } else {
+                            break;
+                          }
+                        }
+                        if (closestMilestoneDay > 0) {
+                          milestoneDaysToMark.add(closestMilestoneDay);
+                        }
+                      }
+
+                      return GestureDetector(
+                        key: index == _targetIndex ? _targetTileKey : null,
+                        onLongPress: () =>
+                            _showClearMilestoneBottomSheet(milestone),
+                        child: TimelineTile(
+                          milestone: milestone,
+                          isCompleted: isCompleted,
+                          isNext: isNext,
+                          isLast: index == widget.milestones.length - 1,
+                          daysAchieved: milestoneDaysToMark,
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        floatingActionButton: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 150),
+          transitionBuilder: (child, animation) =>
+              ScaleTransition(scale: animation, child: child),
+          child: fab,
+        ),
+      ),
+    );
+  }
+}

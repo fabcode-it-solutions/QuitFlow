@@ -1,0 +1,1 @@
+• Fix hide dialog being obscured by system ui

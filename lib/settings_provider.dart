@@ -1,0 +1,494 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:quitflow/color_scheme_type.dart';
+import 'package:quitflow/tasks.dart';
+import 'package:quitflow/app_theme_mode.dart';
+import 'package:quitflow/logging.dart';
+import 'package:quitflow/l10n/generated/app_localizations.dart';
+import 'package:quitflow/locale_utils.dart';
+
+class SettingsProvider extends ChangeNotifier {
+  static const String _themeKey = 'theme_mode';
+  static const String _colorSchemeKey = 'color_scheme';
+  static const String _notifyEveryKey = 'notify_every';
+  static const String _notifyAtKey = 'notify_at';
+  static const _pinHashKey = 'pin_hash';
+  static const _pinEnabledKey = 'pin_enabled';
+  static const _pinTimeoutKey = 'pin_timeout';
+  static const _pinFailedAttemptsKey = 'pin_failed_attempts';
+  static const _pinLockedUntilKey = 'pin_locked_until_ms';
+  static const _localeKey = 'locale';
+  static const _weekStartsMondayKey = 'week_starts_monday';
+  static final Set<String> _supportedLocales = {
+    'system',
+    for (final locale in AppLocalizations.supportedLocales)
+      localePreferenceValue(locale),
+  };
+
+  bool _isUnlocked = false;
+  bool get isUnlocked => _isUnlocked;
+
+  int _pinFailedAttempts = 0;
+  DateTime? _pinLockedUntil;
+
+  bool get isPinLockoutActive {
+    if (_pinLockedUntil == null) return false;
+    return DateTime.now().isBefore(_pinLockedUntil!);
+  }
+
+  int get pinLockoutSecondsRemaining {
+    if (_pinLockedUntil == null) return 0;
+    final remaining = _pinLockedUntil!.difference(DateTime.now()).inSeconds;
+    return remaining < 0 ? 0 : remaining;
+  }
+
+  static const Map<String, String> _showKeys = {
+    'alcohol': 'show_alcohol',
+    'nicotinePouches': 'show_nicotine_pouches',
+    'marijuana': 'show_marijuana',
+    'reset': 'show_reset',
+    'vaping': 'show_vaping',
+    'smoking': 'show_smoking',
+    'opioids': 'show_opioids',
+    'socialMedia': 'show_social_media',
+    'pornography': 'show_pornography',
+    'cocaine': 'show_cocaine',
+    'meth': 'show_meth',
+    'swipeTabs': 'swipe_tabs',
+    'journal': 'show_journal',
+    'benzos': 'show_benzos',
+    'adderall': 'show_adderall',
+    'ssri': 'show_ssri',
+    'snri': 'show_snri',
+    'tca': 'show_tca',
+    'maoi': 'show_maoi',
+  };
+
+  static const Map<String, String> _notifyKeys = {
+    'alcohol': 'notify_alcohol',
+    'marijuana': 'notify_marijuana',
+    'vaping': 'notify_vaping',
+    'smoking': 'notify_smoking',
+    'opioids': 'notify_opioids',
+    'pouches': 'notify_nicotine_pouches',
+    'relapse': 'notify_relapse',
+    'socialMedia': 'notify_social_media',
+    'pornography': 'notify_pornography',
+    'cocaine': 'notify_cocaine',
+    'meth': 'notify_meth',
+    'adderall': 'notify_adderall',
+    'benzos': 'notify_benzos',
+    'ssri': 'notify_ssri',
+    'snri': 'notify_snri',
+    'tca': 'notify_tca',
+    'maoi': 'notify_maoi',
+  };
+
+  bool _isPinEnabled = false;
+  bool get isPinEnabled => _isPinEnabled;
+  int _pinTimeout = 15;
+  int get pinTimeout => _pinTimeout;
+  String _locale = 'system';
+  String get locale => _locale;
+  bool _weekStartsMonday = false;
+  bool get weekStartsMonday => _weekStartsMonday;
+  SharedPreferences? _prefs;
+
+  AppThemeMode _themeMode = AppThemeMode.system;
+  ColorSchemeType _colorSchemeType = ColorSchemeType.dynamic;
+  int _notifyEvery = 1;
+  int _notifyAt = 8 * 60;
+
+  final Map<String, bool> _showSettings = {
+    for (String key in _showKeys.keys) key: true,
+  };
+
+  final Map<String, bool> _notifySettings = {
+    for (String key in _notifyKeys.keys) key: true,
+  };
+
+  AppThemeMode get themeMode => _themeMode;
+  ColorSchemeType get colorSchemeType => _colorSchemeType;
+  int get notifyEvery => _notifyEvery;
+  int get notifyAt => _notifyAt;
+
+  bool get showAlcohol => _showSettings['alcohol']!;
+  bool get showReset => _showSettings['reset']!;
+  bool get showJournal => _showSettings['journal']!;
+  bool get swipeTabs => _showSettings['swipeTabs']!;
+  bool get showVaping => _showSettings['vaping']!;
+  bool get showSmoking => _showSettings['smoking']!;
+  bool get showNicotinePouches => _showSettings['nicotinePouches']!;
+  bool get showMarijuana => _showSettings['marijuana']!;
+  bool get showOpioids => _showSettings['opioids']!;
+  bool get showSocialMedia => _showSettings['socialMedia']!;
+  bool get showPornography => _showSettings['pornography']!;
+  bool get showCocaine => _showSettings['cocaine']!;
+  bool get showMeth => _showSettings['meth']!;
+  bool get showBenzos => _showSettings['benzos']!;
+  bool get showAdderall => _showSettings['adderall']!;
+  bool get showSsri => _showSettings['ssri']!;
+  bool get showSnri => _showSettings['snri']!;
+  bool get showTca => _showSettings['tca']!;
+  bool get showMaoi => _showSettings['maoi']!;
+
+  bool get notifyAlcohol => _notifySettings['alcohol']!;
+  bool get notifyVaping => _notifySettings['vaping']!;
+  bool get notifySmoking => _notifySettings['smoking']!;
+  bool get notifyOpioids => _notifySettings['opioids']!;
+  bool get notifyPouches => _notifySettings['pouches']!;
+  bool get notifySocialMedia => _notifySettings['socialMedia']!;
+  bool get notifyPornography => _notifySettings['pornography']!;
+  bool get notifyCocaine => _notifySettings['cocaine']!;
+  bool get notifyMeth => _notifySettings['meth']!;
+  bool get notifyBenzos => _notifySettings['benzos']!;
+  bool get notifyAdderall => _notifySettings['adderall']!;
+  bool get notifyRelapse => _notifySettings['relapse']!;
+  bool get notifyMarijuana => _notifySettings['marijuana']!;
+  bool get notifySsri => _notifySettings['ssri']!;
+  bool get notifySnri => _notifySettings['snri']!;
+  bool get notifyTca => _notifySettings['tca']!;
+  bool get notifyMaoi => _notifySettings['maoi']!;
+
+  Future<bool> unlock(String pin) async {
+    if (isPinLockoutActive) {
+      talker.warning('Rejected unlock attempt during lockout');
+      return false;
+    }
+
+    if (await verifyPin(pin)) {
+      _isUnlocked = true;
+      await _clearPinFailures();
+      notifyListeners();
+      talker.info('Application unlocked');
+      return true;
+    }
+
+    await _registerFailedPinAttempt();
+    talker.warning('Failed application unlock attempt');
+    return false;
+  }
+
+  Future<void> _registerFailedPinAttempt() async {
+    _pinFailedAttempts++;
+    if (_pinFailedAttempts >= 3) {
+      _pinLockedUntil = DateTime.now().add(const Duration(seconds: 30));
+    }
+    await _persistPinLockoutState();
+    notifyListeners();
+  }
+
+  Future<void> _clearPinFailures() async {
+    _pinFailedAttempts = 0;
+    _pinLockedUntil = null;
+    await _persistPinLockoutState();
+  }
+
+  Future<void> _persistPinLockoutState() async {
+    await _prefs?.setInt(_pinFailedAttemptsKey, _pinFailedAttempts);
+    if (_pinLockedUntil == null) {
+      await _prefs?.remove(_pinLockedUntilKey);
+    } else {
+      await _prefs?.setInt(
+        _pinLockedUntilKey,
+        _pinLockedUntil!.millisecondsSinceEpoch,
+      );
+    }
+  }
+
+  Future<void> clearExpiredPinLockout() async {
+    if (_pinLockedUntil != null && !isPinLockoutActive) {
+      _pinLockedUntil = null;
+      _pinFailedAttempts = 0;
+      await _persistPinLockoutState();
+      notifyListeners();
+    }
+  }
+
+  void lockApp() {
+    _isUnlocked = false;
+    notifyListeners();
+  }
+
+  Future<void> loadPreferences() async {
+    _prefs = await SharedPreferences.getInstance();
+
+    T? read<T>(String key) {
+      final value = _prefs!.get(key);
+      return value is T ? value : null;
+    }
+
+    final themeIndex = read<int>(_themeKey) ?? AppThemeMode.system.index;
+    _themeMode = themeIndex >= 0 && themeIndex < AppThemeMode.values.length
+        ? AppThemeMode.values[themeIndex]
+        : AppThemeMode.system;
+    final colorSchemeIndex =
+        read<int>(_colorSchemeKey) ?? ColorSchemeType.dynamic.index;
+    _colorSchemeType =
+        colorSchemeIndex >= 0 &&
+            colorSchemeIndex < ColorSchemeType.values.length
+        ? ColorSchemeType.values[colorSchemeIndex]
+        : ColorSchemeType.dynamic;
+    final storedNotifyAt = read<int>(_notifyAtKey) ?? (8 * 60);
+    _notifyAt = storedNotifyAt >= 0 && storedNotifyAt < 24 * 60
+        ? storedNotifyAt
+        : 8 * 60;
+    final storedNotifyEvery = read<int>(_notifyEveryKey) ?? 1;
+    _notifyEvery = storedNotifyEvery >= 0 ? storedNotifyEvery : 0;
+    final storedPinTimeout = read<int>(_pinTimeoutKey) ?? 15;
+    _pinTimeout = storedPinTimeout >= 0 ? storedPinTimeout : 15;
+    final storedLocale = read<String>(_localeKey) ?? 'system';
+    _locale = _supportedLocales.contains(storedLocale)
+        ? storedLocale
+        : 'system';
+    _weekStartsMonday = read<bool>(_weekStartsMondayKey) ?? false;
+    final storedFailedAttempts = read<int>(_pinFailedAttemptsKey) ?? 0;
+    _pinFailedAttempts = storedFailedAttempts < 0 ? 0 : storedFailedAttempts;
+    final lockedUntilMs = read<int>(_pinLockedUntilKey);
+    try {
+      _pinLockedUntil = lockedUntilMs != null
+          ? DateTime.fromMillisecondsSinceEpoch(lockedUntilMs)
+          : null;
+    } on RangeError {
+      _pinLockedUntil = null;
+    }
+    if (_pinLockedUntil != null && !isPinLockoutActive) {
+      _pinLockedUntil = null;
+      _pinFailedAttempts = 0;
+      await _prefs!.remove(_pinLockedUntilKey);
+      await _prefs!.setInt(_pinFailedAttemptsKey, 0);
+    }
+
+    _showKeys.forEach((key, prefKey) {
+      final existing = read<bool>(prefKey);
+      if (existing == null &&
+          ['opioids', 'pornography', 'cocaine', 'meth'].contains(key))
+        _showSettings[key] = existing ?? false;
+      else
+        _showSettings[key] = existing ?? true;
+    });
+
+    _notifyKeys.forEach((key, prefKey) {
+      _notifySettings[key] = read<bool>(prefKey) ?? true;
+    });
+
+    final enabled = read<bool>(_pinEnabledKey) == true;
+    final pinHash = read<String>(_pinHashKey);
+    _isPinEnabled = enabled && pinHash != null && pinHash.isNotEmpty;
+    if (enabled && !_isPinEnabled) {
+      await _prefs!.setBool(_pinEnabledKey, false);
+    }
+
+    notifyListeners();
+    talker.debug('Loaded application preferences');
+  }
+
+  Future<void> setLocale(String locale) async {
+    final normalized = _supportedLocales.contains(locale) ? locale : 'system';
+    _locale = normalized;
+    notifyListeners();
+    await _prefs?.setString(_localeKey, normalized);
+  }
+
+  set weekStartsMonday(bool value) {
+    _weekStartsMonday = value;
+    _prefs?.setBool(_weekStartsMondayKey, value);
+    notifyListeners();
+  }
+
+  Future<void> setPinTimeout(int timeout) async {
+    final normalized = timeout < 0 ? 0 : timeout;
+    _pinTimeout = normalized;
+    notifyListeners();
+    await _prefs?.setInt(_pinTimeoutKey, normalized);
+  }
+
+  Future<void> setPinEnabled(bool enabled, String? pin) async {
+    if (enabled && pin != null && pin.isNotEmpty) {
+      final hash = sha256.convert(utf8.encode(pin)).toString();
+      await _prefs?.setString(_pinHashKey, hash);
+      await _prefs?.setBool(_pinEnabledKey, true);
+      _isPinEnabled = true;
+    } else {
+      await _prefs?.remove(_pinHashKey);
+      await _prefs?.setBool(_pinEnabledKey, false);
+      _isPinEnabled = false;
+    }
+    notifyListeners();
+    talker.info(
+      enabled ? 'Enabled application PIN' : 'Disabled application PIN',
+    );
+  }
+
+  Future<bool> verifyPin(String pin) async {
+    final storedValue = _prefs?.get(_pinHashKey);
+    final storedHash = storedValue is String ? storedValue : null;
+    if (storedHash == null) return false;
+
+    final inputHash = sha256.convert(utf8.encode(pin)).toString();
+    return inputHash == storedHash;
+  }
+
+  void _updateBoolSetting(
+    Map<String, bool> settings,
+    Map<String, String> keys,
+    String key,
+    bool value,
+  ) {
+    settings[key] = value;
+    _prefs?.setBool(keys[key]!, value);
+    notifyListeners();
+  }
+
+  set themeMode(AppThemeMode mode) {
+    _themeMode = mode;
+    _prefs?.setInt(_themeKey, mode.index);
+    notifyListeners();
+  }
+
+  set colorSchemeType(ColorSchemeType type) {
+    _colorSchemeType = type;
+    _prefs?.setInt(_colorSchemeKey, type.index);
+    notifyListeners();
+  }
+
+  Future<void> setNotificationSchedule({
+    required int days,
+    required int at,
+  }) async {
+    final normalizedDays = days < 0 ? 0 : days;
+    final normalizedAt = at.clamp(0, 24 * 60 - 1);
+    _notifyEvery = normalizedDays;
+    _notifyAt = normalizedAt;
+    await Future.wait([
+      _prefs?.setInt(_notifyEveryKey, normalizedDays) ?? Future.value(true),
+      _prefs?.setInt(_notifyAtKey, normalizedAt) ?? Future.value(true),
+    ]);
+    notifyListeners();
+    await rescheduleTasks();
+  }
+
+  Future<void> _persistNotificationSettingAndReschedule(
+    String key,
+    int value,
+  ) async {
+    await _prefs?.setInt(key, value);
+    await rescheduleTasks();
+  }
+
+  set notifyAt(int value) {
+    final normalized = value.clamp(0, 24 * 60 - 1);
+    _notifyAt = normalized;
+    notifyListeners();
+    unawaited(
+      _persistNotificationSettingAndReschedule(_notifyAtKey, normalized),
+    );
+  }
+
+  set notifyEvery(int days) {
+    final normalized = days < 0 ? 0 : days;
+    _notifyEvery = normalized;
+    notifyListeners();
+    unawaited(
+      _persistNotificationSettingAndReschedule(_notifyEveryKey, normalized),
+    );
+  }
+
+  set showAlcohol(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'alcohol', show);
+  set swipeTabs(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'swipeTabs', show);
+  set showReset(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'reset', show);
+  set showJournal(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'journal', show);
+  set showVaping(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'vaping', show);
+  set showSmoking(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'smoking', show);
+  set showNicotinePouches(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'nicotinePouches', show);
+  set showMarijuana(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'marijuana', show);
+  set showOpioids(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'opioids', show);
+  set showSocialMedia(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'socialMedia', show);
+  set showMeth(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'meth', show);
+  set showAdderall(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'adderall', show);
+  set showBenzos(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'benzos', show);
+  set showCocaine(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'cocaine', show);
+  set showSsri(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'ssri', show);
+  set showSnri(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'snri', show);
+  set showTca(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'tca', show);
+  set showMaoi(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'maoi', show);
+  set showPornography(bool show) =>
+      _updateBoolSetting(_showSettings, _showKeys, 'pornography', show);
+
+  set notifyAlcohol(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'alcohol', notify);
+  set notifyVaping(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'vaping', notify);
+  set notifySmoking(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'smoking', notify);
+  set notifyOpioids(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'opioids', notify);
+  set notifyPouches(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'pouches', notify);
+  set notifySocialMedia(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'socialMedia', notify);
+  set notifyMeth(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'meth', notify);
+  set notifyAdderall(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'adderall', notify);
+  set notifyBenzos(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'benzos', notify);
+  set notifyCocaine(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'cocaine', notify);
+  set notifyPornography(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'pornography', notify);
+  set notifyRelapse(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'relapse', notify);
+  set notifyMarijuana(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'marijuana', notify);
+  set notifySsri(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'ssri', notify);
+  set notifySnri(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'snri', notify);
+  set notifyTca(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'tca', notify);
+  set notifyMaoi(bool notify) =>
+      _updateBoolSetting(_notifySettings, _notifyKeys, 'maoi', notify);
+
+  bool getPresetNotify(String key) {
+    final value = _prefs?.get('notify_$key');
+    return value is bool ? value : true;
+  }
+
+  void setPresetNotify(String key, bool value) {
+    _prefs?.setBool('notify_$key', value);
+    notifyListeners();
+  }
+
+  bool getEntryNotify(String entryId) {
+    final value = _prefs?.get('notify_entry_$entryId');
+    return value is bool ? value : true;
+  }
+
+  void setEntryNotify(String entryId, bool value) {
+    _prefs?.setBool('notify_entry_$entryId', value);
+    notifyListeners();
+  }
+}

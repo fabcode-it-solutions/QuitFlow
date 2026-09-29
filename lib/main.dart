@@ -1,0 +1,296 @@
+import 'dart:async';
+
+import 'package:dynamic_color/dynamic_color.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_svg/svg.dart';
+import 'package:provider/provider.dart';
+import 'package:quitflow/addiction_provider.dart';
+import 'package:quitflow/app_scheme.dart';
+import 'package:quitflow/app_theme_mode.dart';
+import 'package:quitflow/crash_logger.dart';
+import 'package:quitflow/home_page.dart';
+import 'package:quitflow/journal_page.dart';
+import 'package:quitflow/l10n/generated/app_localizations.dart';
+import 'package:quitflow/logging.dart';
+import 'package:quitflow/locale_utils.dart';
+import 'package:quitflow/pin_page.dart';
+import 'package:quitflow/settings_provider.dart';
+import 'package:quitflow/stats_page.dart';
+import 'package:quitflow/tasks.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+final rootScaffoldMessenger = GlobalKey<ScaffoldMessengerState>();
+
+Future<void> _migrateHiddenToDeleted() async {
+  final prefs = await SharedPreferences.getInstance();
+  if (prefs.get('migrated_v2_hide_to_delete') == true) return;
+
+  talker.info('Running hidden-journey migration');
+
+  const pairs = {
+    'show_adderall': 'adderall',
+    'show_alcohol': 'alcohol',
+    'show_benzos': 'benzos',
+    'show_cocaine': 'cocaine',
+    'show_heroin': 'heroin',
+    'show_marijuana': 'marijuana',
+    'show_meth': 'meth',
+    'show_nicotine_pouches': 'nicotine_pouches',
+    'show_opioids': 'opioids',
+    'show_pornography': 'pornography',
+    'show_smoking': 'smoking',
+    'show_social_media': 'social_media',
+    'show_ssri': 'ssri',
+    'show_snri': 'snri',
+    'show_tca': 'tca',
+    'show_maoi': 'maoi',
+    'show_vaping': 'vaping',
+  };
+
+  for (final entry in pairs.entries) {
+    final wasHidden = prefs.get(entry.key) == false;
+    if (wasHidden) await prefs.remove(entry.value);
+  }
+
+  await prefs.setBool('migrated_v2_hide_to_delete', true);
+  talker.info('Completed hidden-journey migration');
+}
+
+Future<void> main() async {
+  runZonedGuarded(
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
+      await CrashLogger.install(fileName: 'quitflow-crash.log');
+      installTalkerErrorHandlers();
+      talker.info('Starting QuitFlow');
+
+      await _migrateHiddenToDeleted();
+
+      final settings = SettingsProvider();
+      await settings.loadPreferences();
+      final addiction = AddictionProvider();
+      await addiction.loadAddictions();
+
+      talker.info('Application state loaded');
+
+      await rescheduleTasks();
+
+      runApp(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider(create: (context) => settings),
+            ChangeNotifierProvider(create: (context) => addiction),
+          ],
+          child: const QuitFlowApp(),
+        ),
+      );
+    },
+    (error, stack) =>
+        CrashLogger.instance?.record(error, stack, context: 'zone'),
+  );
+}
+
+class QuitFlowApp extends StatefulWidget {
+  const QuitFlowApp({super.key});
+
+  @override
+  State<QuitFlowApp> createState() => _QuitFlowAppState();
+}
+
+class _QuitFlowAppState extends State<QuitFlowApp>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
+  late TabController _tabController;
+  DateTime? _pausedTime;
+
+  @override
+  void initState() {
+    super.initState();
+    final settings = context.read<SettingsProvider>();
+    final tabCount = settings.showJournal ? 3 : 2;
+    _tabController = TabController(length: tabCount, vsync: this);
+
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _pausedTime = DateTime.now();
+      talker.debug('Application paused');
+    } else if (state == AppLifecycleState.resumed && _pausedTime != null) {
+      final now = DateTime.now();
+      final elapsed = now.difference(_pausedTime!);
+      final settings = context.read<SettingsProvider>();
+      if (elapsed.inSeconds < settings.pinTimeout) return;
+
+      settings.lockApp();
+      talker.info('Locked application after inactivity timeout');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<SettingsProvider>(
+      builder: (context, settings, child) {
+        final expectedTabCount = settings.showJournal ? 3 : 2;
+        if (_tabController.length != expectedTabCount) {
+          final oldController = _tabController;
+          final initialIndex = oldController.index.clamp(
+            0,
+            expectedTabCount - 1,
+          );
+          _tabController = TabController(
+            length: expectedTabCount,
+            vsync: this,
+            initialIndex: initialIndex,
+          );
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            oldController.dispose();
+          });
+        }
+
+        return DynamicColorBuilder(
+          builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
+            final lightColorScheme = AppScheme.getColorScheme(
+              settings.colorSchemeType,
+              Brightness.light,
+              lightDynamic,
+            );
+            ColorScheme darkColorScheme = AppScheme.getColorScheme(
+              settings.colorSchemeType,
+              Brightness.dark,
+              darkDynamic,
+            );
+
+            if (settings.themeMode == AppThemeMode.pureBlack) {
+              darkColorScheme = darkColorScheme.copyWith(
+                surface: Colors.black,
+                surfaceContainer: const Color(0xFF0A0A0A),
+                surfaceContainerLow: Colors.black,
+                surfaceContainerLowest: Colors.black,
+                surfaceContainerHigh: const Color(0xFF151515),
+                surfaceContainerHighest: const Color(0xFF1A1A1A),
+                onSurface: Colors.white,
+                outline: const Color(0xFF404040),
+                outlineVariant: const Color(0xFF303030),
+              );
+            }
+
+            return MaterialApp(
+              onGenerateTitle: (context) =>
+                  AppLocalizations.of(context)!.appTitle,
+              scaffoldMessengerKey: rootScaffoldMessenger,
+              locale: settings.locale == 'system'
+                  ? null
+                  : localeFromPreference(settings.locale),
+              localizationsDelegates: const [
+                AppLocalizations.delegate,
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+              supportedLocales: AppLocalizations.supportedLocales,
+              themeMode: settings.themeMode.toThemeMode(),
+              theme: ThemeData(
+                colorScheme: lightColorScheme,
+                useMaterial3: true,
+              ),
+              darkTheme: ThemeData(
+                colorScheme: darkColorScheme,
+                useMaterial3: true,
+                scaffoldBackgroundColor:
+                    settings.themeMode == AppThemeMode.pureBlack
+                    ? Colors.black
+                    : null,
+              ),
+              home: settings.isPinEnabled && !settings.isUnlocked
+                  ? PinPage()
+                  : Builder(
+                      builder: (context) => Material(
+                        color: Theme.of(context).scaffoldBackgroundColor,
+                        child: SafeArea(
+                          bottom: false,
+                          child: Column(
+                            children: [
+                              AppBar(
+                                title: AnimatedBuilder(
+                                  animation: _tabController.animation!,
+                                  builder: (context, child) {
+                                    final l10n = AppLocalizations.of(context)!;
+                                    return TabBar(
+                                      indicatorPadding: EdgeInsetsGeometry.only(
+                                        bottom: 32,
+                                      ),
+                                      controller: _tabController,
+                                      tabs: [
+                                        Tab(
+                                          icon: SvgPicture.asset(
+                                            'assets/neurology.svg',
+                                            width: 24,
+                                            height: 24,
+                                            colorFilter: ColorFilter.mode(
+                                              Color.lerp(
+                                                Theme.of(
+                                                  context,
+                                                ).colorScheme.primary,
+                                                Theme.of(
+                                                  context,
+                                                ).colorScheme.onSurfaceVariant,
+                                                (_tabController
+                                                        .animation!
+                                                        .value)
+                                                    .clamp(0.0, 1.0),
+                                              )!,
+                                              BlendMode.srcIn,
+                                            ),
+                                          ),
+                                          text: l10n.tabQuitter,
+                                        ),
+                                        Tab(
+                                          icon: const Icon(Icons.insights),
+                                          text: l10n.tabStats,
+                                        ),
+                                        if (settings.showJournal)
+                                          Tab(
+                                            icon: const Icon(Icons.menu_book),
+                                            text: l10n.tabJournal,
+                                          ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                              ),
+                              Expanded(
+                                child: TabBarView(
+                                  controller: _tabController,
+                                  physics: settings.swipeTabs
+                                      ? const AlwaysScrollableScrollPhysics()
+                                      : const NeverScrollableScrollPhysics(),
+                                  children: [
+                                    const HomePage(),
+                                    const StatsPage(),
+                                    if (settings.showJournal)
+                                      const JournalPage(),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+            );
+          },
+        );
+      },
+    );
+  }
+}

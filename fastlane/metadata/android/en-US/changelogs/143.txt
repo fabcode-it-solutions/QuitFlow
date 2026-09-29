@@ -1,0 +1,7 @@
+• Add date pickers
+• Add nicotine pouches
+• Change alcohol icon
+• Improve style of settings page
+• Open relevant links when tapping studies
+• Remove debugging from reminders
+• Remove debugging notifications
